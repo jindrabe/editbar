@@ -41,6 +41,10 @@ A small, unobtrusive bar sits bottom-left, visible only to signed-in admins:
 - Changes are cached locally until you explicitly **Save changes** — nothing
   is public until you say so.
 - **Discard** reverts to the last published version.
+- **✕** collapses the bar to a small pencil tab hugging the left edge —
+  click it to bring the full bar back. Visiting the page with `#editbar` in
+  the URL always force-opens it, even if it was left collapsed, without
+  needing to retype the token.
 - Regular visitors never see the bar and never touch anything but the
   published text.
 

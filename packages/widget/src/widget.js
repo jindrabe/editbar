@@ -13,12 +13,14 @@
   var apiBase = resolveApiBase(scriptEl);
   var tokenStorageKey = "editbar_token";
   var draftsStorageKey = "editbar_drafts:" + location.host;
+  var collapsedStorageKey = "editbar_collapsed:" + location.host;
 
   var state = {
     published: {},
     drafts: loadDrafts(),
     editing: false,
     token: loadToken(),
+    collapsed: loadCollapsed(),
     originals: new Map(), // edit-id -> text present in the DOM before any override
   };
 
@@ -54,6 +56,26 @@
     } catch (e) {
       return "";
     }
+  }
+
+  function loadCollapsed() {
+    // #editbar always forces the bar open, even if it was left collapsed —
+    // the memorable way for an admin to bring it back without retyping a token.
+    if (location.hash === "#editbar") {
+      history.replaceState({}, "", location.pathname + location.search);
+      return false;
+    }
+    try {
+      return localStorage.getItem(collapsedStorageKey) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function saveCollapsed() {
+    try {
+      localStorage.setItem(collapsedStorageKey, state.collapsed ? "1" : "0");
+    } catch (e) {}
   }
 
   function loadDrafts() {
@@ -250,12 +272,17 @@
       });
   }
 
-  function signOut() {
-    try {
-      localStorage.removeItem(tokenStorageKey);
-    } catch (e) {}
-    setEditing(false);
-    removeBar();
+  function collapse() {
+    if (state.editing) setEditing(false);
+    state.collapsed = true;
+    saveCollapsed();
+    renderBarState();
+  }
+
+  function expand() {
+    state.collapsed = false;
+    saveCollapsed();
+    renderBarState();
   }
 
   // ---- Bar UI (Shadow DOM) ----------------------------------------------
@@ -380,6 +407,59 @@
     }
     .status.error { color: #ff3b30; opacity: 1; }
     .status.ok { color: #34c759; opacity: 1; }
+    .tab {
+      position: fixed;
+      left: 0;
+      bottom: 16px;
+      z-index: 2147483647;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 0 16px 16px 0;
+      font-size: 18px;
+      color: #1c1c1e;
+      background: rgba(255, 255, 255, 0.5);
+      backdrop-filter: blur(28px) saturate(1.9);
+      -webkit-backdrop-filter: blur(28px) saturate(1.9);
+      box-shadow:
+        0 0 0 0.5px rgba(0,0,0,0.05),
+        inset 0 1px 0 rgba(255,255,255,0.7),
+        0 2px 6px rgba(0,0,0,0.06),
+        0 8px 24px rgba(0,0,0,0.16);
+      cursor: pointer;
+      border: none;
+      padding: 0;
+      animation: editbar-in 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+    .tab:hover { transform: translateX(4px); }
+    .tab:active { transform: translateX(2px) scale(0.96); }
+    @media (prefers-color-scheme: dark) {
+      .tab {
+        color: #f2f2f7;
+        background: rgba(30, 30, 32, 0.5);
+        box-shadow:
+          0 0 0 0.5px rgba(0,0,0,0.3),
+          inset 0 1px 0 rgba(255,255,255,0.12),
+          0 2px 6px rgba(0,0,0,0.3),
+          0 8px 24px rgba(0,0,0,0.45);
+      }
+    }
+    .tab .badge {
+      position: absolute;
+      top: 4px;
+      right: 6px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #0a84ff;
+      box-shadow: 0 0 0 2px rgba(255,255,255,0.6);
+    }
+    @media (prefers-color-scheme: dark) {
+      .tab .badge { box-shadow: 0 0 0 2px rgba(30,30,32,0.8); }
+    }
   `;
 
   function h(tag, attrs, text) {
@@ -408,14 +488,14 @@
     var saveBtn = h("button", { class: "primary" }, "Save changes");
     var discardBtn = h("button", {}, "Discard");
     var status = h("span", { class: "status" });
-    var signOutBtn = h("button", { class: "icon", title: "Exit admin mode" }, "✕");
+    var collapseBtn = h("button", { class: "icon", title: "Collapse" }, "✕");
 
     editBtn.addEventListener("click", function () {
       setEditing(!state.editing);
     });
     saveBtn.addEventListener("click", saveChanges);
     discardBtn.addEventListener("click", discardDrafts);
-    signOutBtn.addEventListener("click", signOut);
+    collapseBtn.addEventListener("click", collapse);
 
     var groupLeft = h("div", { class: "group" });
     groupLeft.appendChild(dot);
@@ -430,17 +510,19 @@
     bar.appendChild(h("div", { class: "divider" }));
     bar.appendChild(groupRight);
     bar.appendChild(h("div", { class: "divider" }));
-    bar.appendChild(signOutBtn);
+    bar.appendChild(collapseBtn);
     shadow.appendChild(bar);
+
+    var tab = h("button", { class: "tab", title: "Open Editbar" }, "✏️");
+    var tabBadge = h("span", { class: "badge" });
+    tab.appendChild(tabBadge);
+    tab.addEventListener("click", expand);
+    shadow.appendChild(tab);
+
     document.body.appendChild(host);
 
-    els = { host, dot, editBtn, saveBtn, discardBtn, status };
+    els = { host, bar, tab, tabBadge, dot, editBtn, saveBtn, discardBtn, status };
     renderBarState();
-  }
-
-  function removeBar() {
-    if (els.host) els.host.remove();
-    els = {};
   }
 
   function setStatus(text, kind) {
@@ -466,6 +548,10 @@
     els.saveBtn.textContent =
       draftCount > 0 ? "Save changes (" + draftCount + ")" : "Save changes";
     els.discardBtn.style.display = draftCount > 0 ? "" : "none";
+
+    els.bar.style.display = state.collapsed ? "none" : "flex";
+    els.tab.style.display = state.collapsed ? "flex" : "none";
+    els.tabBadge.style.display = draftCount > 0 ? "block" : "none";
   }
 
   // ---- Boot ---------------------------------------------------------------
