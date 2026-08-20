@@ -178,16 +178,20 @@ needs to point at wherever you run the actual API (`/overrides.json`,
 
 Tools like Storyblok, Builder.io, or Weglot solve a related but bigger
 problem — they usually want you to build your site on top of them, or add a
-per-framework SDK. Editbar is intentionally narrower: if all you need is
-"let a non-technical person fix text on an existing site," it's a five-minute
-integration instead of a CMS migration.
+per-framework SDK. The closest open-source relatives are similarly broader
+in scope: [Tolgee](https://tolgee.io) does in-context editing but for
+localization strings specifically, via a framework SDK; [TinaCMS](https://tina.io)
+does visual editing but as a full git-based headless CMS your site has to
+adopt. Editbar is intentionally narrower than all of them: if all you need
+is "let a non-technical person fix text on an existing site," it's a
+five-minute integration instead of a CMS migration or an SDK install.
 
-|                          | Editbar (OSS)      | Typical headless CMS |
-| ------------------------ | ------------------- | --------------------- |
-| Integration               | one `<script>` tag | SDK per framework      |
-| Works on existing sites   | yes                 | usually requires rebuilding templates |
-| Content scope             | text only (v1)      | full content modeling |
-| Self-hostable for free    | yes                 | rarely                |
+|                          | Editbar (OSS)      | Tolgee            | TinaCMS                | Typical headless CMS |
+| ------------------------ | ------------------- | ------------------ | ----------------------- | --------------------- |
+| Integration               | one `<script>` tag | SDK per framework  | adopt Tina's data layer | SDK per framework      |
+| Works on existing sites   | yes                 | yes (for i18n strings) | requires restructuring content as Markdown/MDX/JSON | usually requires rebuilding templates |
+| Scope                      | any text on the page | translation strings only | full content modeling | full content modeling |
+| Self-hostable for free    | yes                 | yes                 | yes                      | rarely                |
 
 ## FAQ
 
