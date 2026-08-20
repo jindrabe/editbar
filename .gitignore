@@ -4,3 +4,4 @@ dist/
 .env
 .DS_Store
 packages/server/data/overrides.json
+packages/server/data/token.txt

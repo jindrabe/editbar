@@ -27,3 +27,22 @@ export function verifyToken(provided, expected) {
   const expectedHash = crypto.createHash("sha256").update(expected).digest();
   return crypto.timingSafeEqual(providedHash, expectedHash);
 }
+
+export function generateToken() {
+  return crypto.randomBytes(24).toString("base64url");
+}
+
+export async function readToken(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    return raw.trim() || null;
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+}
+
+export async function writeToken(filePath, token) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, token, { encoding: "utf8", mode: 0o600 });
+}

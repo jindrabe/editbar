@@ -57,6 +57,35 @@
 - Saved text is inserted via `textContent`, never `innerHTML` — an admin (or anyone who guessed/leaked a token) can only ever change what visitors *read*, not inject markup or scripts.
 - CORS on the reference server is intentionally permissive, since the whole point is that the widget can be embedded on any origin; the bearer token (not a cookie) is what's actually gating writes, so a wildcard `Access-Control-Allow-Origin` doesn't weaken that.
 
+## Token provisioning
+
+If `EDIT_TOKEN` isn't set, the server generates a strong random token itself
+on first boot (`crypto.randomBytes(24)`, base64url), persists it to
+`TOKEN_FILE` with `0600` permissions, and reuses it on every restart. This
+replaced an earlier design where the server either fell back to an insecure
+hardcoded `dev-token` in development or refused to start at all in
+production — auto-provisioning gives every install a real secret without
+either failure mode.
+
+`GET /setup` is a convenience page mirroring that same token so a first-time
+admin doesn't have to read server logs. It's deliberately restricted:
+- Requests from loopback (the machine running the server) can always reach
+  it — there's no useful attacker model for "I already have a shell on this
+  box."
+- Remote requests get it once (or within 15 minutes of server start,
+  whichever comes first); after that it 410s. This bounds the window in
+  which an automated scanner that stumbles onto a freshly deployed,
+  publicly reachable server before its owner does could otherwise capture
+  the admin token over HTTP. The token remains available afterwards from
+  server logs, or from the widget's Settings panel once an admin has
+  activated it at least once.
+
+`POST /token/rotate` requires the *current* valid token and returns a new
+one, immediately invalidating every other copy of the admin link. It's a
+no-op error (400) when `EDIT_TOKEN` was set explicitly via the environment,
+since the running process can't durably change what the next restart will
+read back from the environment.
+
 ## Why not patch at build/SSR time?
 
 An earlier version of this design considered resolving overrides at render time (so text would be visible to non-JS crawlers immediately). That requires every framework to adopt a small helper function, which breaks the "paste one script tag into any site" promise this project is built around. Google's crawler does execute JavaScript, so the practical SEO impact of the current client-side-only approach is limited to non-JS scrapers and link-preview bots. A guaranteed-SEO-visible mode is a reasonable **paid/hosted** add-on for teams that need it, not a requirement for the open-source core — see the roadmap in the [README](../README.md).

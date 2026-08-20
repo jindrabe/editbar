@@ -21,6 +21,8 @@
     editing: false,
     token: loadToken(),
     collapsed: loadCollapsed(),
+    panelOpen: false,
+    tokenRevealed: false,
     originals: new Map(), // edit-id -> text present in the DOM before any override
   };
 
@@ -275,14 +277,93 @@
   function collapse() {
     if (state.editing) setEditing(false);
     state.collapsed = true;
+    state.panelOpen = false;
     saveCollapsed();
     renderBarState();
+    renderPanelState();
   }
 
   function expand() {
     state.collapsed = false;
     saveCollapsed();
     renderBarState();
+  }
+
+  function togglePanel() {
+    state.panelOpen = !state.panelOpen;
+    renderPanelState();
+  }
+
+  function buildAdminLink() {
+    var url = new URL(location.href);
+    url.searchParams.set("edit_token", state.token);
+    return url.toString();
+  }
+
+  function copyToClipboardFallback(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (e) {}
+    ta.remove();
+    return ok ? Promise.resolve() : Promise.reject(new Error("copy failed"));
+  }
+
+  function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text).catch(function () {
+          return copyToClipboardFallback(text);
+        });
+      }
+    } catch (e) {
+      /* fall through to the execCommand fallback below */
+    }
+    return copyToClipboardFallback(text);
+  }
+
+  function rotateToken() {
+    if (
+      !window.confirm(
+        "Rotate the admin token? Any other saved admin links will stop working immediately."
+      )
+    ) {
+      return;
+    }
+    setPanelStatus("Rotating…", null);
+    fetch(apiBase + "/token/rotate", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token },
+    })
+      .then(function (res) {
+        if (res.ok) return res.json();
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (body) {
+            throw new Error(body.error || "rotate failed");
+          });
+      })
+      .then(function (data) {
+        state.token = data.token;
+        try {
+          localStorage.setItem(tokenStorageKey, state.token);
+        } catch (e) {}
+        state.tokenRevealed = true;
+        renderPanelState();
+        setPanelStatus("Token rotated", "ok");
+      })
+      .catch(function (err) {
+        setPanelStatus(err.message || "Could not rotate token", "error");
+      });
   }
 
   // ---- Bar UI (Shadow DOM) ----------------------------------------------
@@ -460,6 +541,83 @@
     @media (prefers-color-scheme: dark) {
       .tab .badge { box-shadow: 0 0 0 2px rgba(30,30,32,0.8); }
     }
+    .panel {
+      position: fixed;
+      left: 16px;
+      bottom: 68px;
+      z-index: 2147483647;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      width: 260px;
+      padding: 14px;
+      border-radius: 18px;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", system-ui, sans-serif;
+      font-size: 13px;
+      color: #1c1c1e;
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(28px) saturate(1.9);
+      -webkit-backdrop-filter: blur(28px) saturate(1.9);
+      box-shadow:
+        0 0 0 0.5px rgba(0,0,0,0.05),
+        inset 0 1px 0 rgba(255,255,255,0.7),
+        0 2px 6px rgba(0,0,0,0.06),
+        0 12px 32px rgba(0,0,0,0.16);
+      animation: editbar-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @media (prefers-color-scheme: dark) {
+      .panel {
+        color: #f2f2f7;
+        background: rgba(30, 30, 32, 0.7);
+        box-shadow:
+          0 0 0 0.5px rgba(0,0,0,0.3),
+          inset 0 1px 0 rgba(255,255,255,0.12),
+          0 2px 6px rgba(0,0,0,0.3),
+          0 12px 32px rgba(0,0,0,0.45);
+      }
+    }
+    .panel-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      opacity: 0.55;
+      font-weight: 600;
+    }
+    .panel-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .token-value {
+      flex: 1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      background: rgba(0,0,0,0.06);
+      border-radius: 8px;
+      padding: 6px 8px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    @media (prefers-color-scheme: dark) {
+      .token-value { background: rgba(255,255,255,0.1); }
+    }
+    button.small {
+      padding: 6px 10px;
+      font-size: 12px;
+      background: rgba(0,0,0,0.06);
+      flex: none;
+    }
+    @media (prefers-color-scheme: dark) {
+      button.small { background: rgba(255,255,255,0.1); }
+    }
+    button.small:hover { background: rgba(0,0,0,0.1); }
+    @media (prefers-color-scheme: dark) {
+      button.small:hover { background: rgba(255,255,255,0.16); }
+    }
+    button.full { width: 100%; }
+    button.danger { color: #ff3b30; }
+    .panel .status { padding: 0; }
   `;
 
   function h(tag, attrs, text) {
@@ -488,6 +646,7 @@
     var saveBtn = h("button", { class: "primary" }, "Save changes");
     var discardBtn = h("button", {}, "Discard");
     var status = h("span", { class: "status" });
+    var settingsBtn = h("button", { class: "icon", title: "Settings" }, "⚙");
     var collapseBtn = h("button", { class: "icon", title: "Collapse" }, "✕");
 
     editBtn.addEventListener("click", function () {
@@ -495,6 +654,7 @@
     });
     saveBtn.addEventListener("click", saveChanges);
     discardBtn.addEventListener("click", discardDrafts);
+    settingsBtn.addEventListener("click", togglePanel);
     collapseBtn.addEventListener("click", collapse);
 
     var groupLeft = h("div", { class: "group" });
@@ -510,6 +670,7 @@
     bar.appendChild(h("div", { class: "divider" }));
     bar.appendChild(groupRight);
     bar.appendChild(h("div", { class: "divider" }));
+    bar.appendChild(settingsBtn);
     bar.appendChild(collapseBtn);
     shadow.appendChild(bar);
 
@@ -519,10 +680,73 @@
     tab.addEventListener("click", expand);
     shadow.appendChild(tab);
 
+    var panel = h("div", { class: "panel" });
+    var tokenLabel = h("span", { class: "panel-label" }, "Admin token");
+    var tokenValue = h("code", { class: "token-value" });
+    var revealBtn = h("button", { class: "small" }, "Show");
+    var tokenRow = h("div", { class: "panel-row" });
+    tokenRow.appendChild(tokenValue);
+    tokenRow.appendChild(revealBtn);
+
+    var copyTokenBtn = h("button", { class: "small" }, "Copy token");
+    var copyLinkBtn = h("button", { class: "small" }, "Copy admin link");
+    var actionsRow = h("div", { class: "panel-row" });
+    actionsRow.appendChild(copyTokenBtn);
+    actionsRow.appendChild(copyLinkBtn);
+
+    var rotateBtn = h("button", { class: "small danger full" }, "Rotate token");
+    var panelStatus = h("div", { class: "status" });
+
+    revealBtn.addEventListener("click", function () {
+      state.tokenRevealed = !state.tokenRevealed;
+      renderPanelState();
+    });
+    copyTokenBtn.addEventListener("click", function () {
+      copyToClipboard(state.token)
+        .then(function () {
+          setPanelStatus("Token copied", "ok");
+        })
+        .catch(function () {
+          setPanelStatus("Could not copy — copy it manually", "error");
+        });
+    });
+    copyLinkBtn.addEventListener("click", function () {
+      copyToClipboard(buildAdminLink())
+        .then(function () {
+          setPanelStatus("Link copied", "ok");
+        })
+        .catch(function () {
+          setPanelStatus("Could not copy — copy it manually", "error");
+        });
+    });
+    rotateBtn.addEventListener("click", rotateToken);
+
+    panel.appendChild(tokenLabel);
+    panel.appendChild(tokenRow);
+    panel.appendChild(actionsRow);
+    panel.appendChild(rotateBtn);
+    panel.appendChild(panelStatus);
+    shadow.appendChild(panel);
+
     document.body.appendChild(host);
 
-    els = { host, bar, tab, tabBadge, dot, editBtn, saveBtn, discardBtn, status };
+    els = {
+      host,
+      bar,
+      tab,
+      tabBadge,
+      panel,
+      tokenValue,
+      revealBtn,
+      panelStatus,
+      dot,
+      editBtn,
+      saveBtn,
+      discardBtn,
+      status,
+    };
     renderBarState();
+    renderPanelState();
   }
 
   function setStatus(text, kind) {
@@ -552,6 +776,34 @@
     els.bar.style.display = state.collapsed ? "none" : "flex";
     els.tab.style.display = state.collapsed ? "flex" : "none";
     els.tabBadge.style.display = draftCount > 0 ? "block" : "none";
+  }
+
+  function maskToken(token) {
+    return "•".repeat(Math.min(token.length, 24));
+  }
+
+  function setPanelStatus(text, kind) {
+    if (!els.panelStatus) return;
+    els.panelStatus.textContent = text || "";
+    els.panelStatus.className = "status" + (kind ? " " + kind : "");
+    if (kind === "ok") {
+      setTimeout(function () {
+        if (els.panelStatus) {
+          els.panelStatus.textContent = "";
+          els.panelStatus.className = "status";
+        }
+      }, 2000);
+    }
+  }
+
+  function renderPanelState() {
+    if (!els.panel) return;
+    els.panel.style.display =
+      state.panelOpen && !state.collapsed ? "flex" : "none";
+    els.tokenValue.textContent = state.tokenRevealed
+      ? state.token
+      : maskToken(state.token);
+    els.revealBtn.textContent = state.tokenRevealed ? "Hide" : "Show";
   }
 
   // ---- Boot ---------------------------------------------------------------

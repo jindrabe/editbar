@@ -139,3 +139,106 @@ describe("editbar server", () => {
     expect((await attempt()).status).toBe(429);
   });
 });
+
+describe("token provisioning", () => {
+  let dir;
+  let overridesFile;
+  let tokenFile;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), "editbar-provision-test-"));
+    overridesFile = path.join(dir, "overrides.json");
+    tokenFile = path.join(dir, "token.txt");
+  });
+
+  afterEach(async () => {
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("GET /setup 404s when the token is fixed via EDIT_TOKEN (no tokenFile)", async () => {
+    const app = createApp({ editToken: TOKEN, overridesFile });
+    const res = await request(app).get("/setup");
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /setup keeps working for loopback requests even after being viewed", async () => {
+    const app = createApp({
+      editToken: TOKEN,
+      overridesFile,
+      tokenFile,
+      isLoopback: () => true,
+    });
+    expect((await request(app).get("/setup")).status).toBe(200);
+    const second = await request(app).get("/setup");
+    expect(second.status).toBe(200);
+    expect(second.text).toContain(TOKEN);
+  });
+
+  it("GET /setup is one-time for non-loopback requests", async () => {
+    const app = createApp({
+      editToken: TOKEN,
+      overridesFile,
+      tokenFile,
+      isLoopback: () => false,
+    });
+    const first = await request(app).get("/setup");
+    expect(first.status).toBe(200);
+    expect(first.text).toContain(TOKEN);
+
+    const second = await request(app).get("/setup");
+    expect(second.status).toBe(410);
+  });
+
+  it("GET /setup expires for non-loopback requests after the TTL", async () => {
+    const app = createApp({
+      editToken: TOKEN,
+      overridesFile,
+      tokenFile,
+      isLoopback: () => false,
+      serverStartedAt: Date.now() - 60 * 60 * 1000, // 1 hour ago
+    });
+    const res = await request(app).get("/setup");
+    expect(res.status).toBe(410);
+  });
+
+  it("POST /token/rotate requires a valid token", async () => {
+    const app = createApp({ editToken: TOKEN, overridesFile, tokenFile });
+    const res = await request(app).post("/token/rotate");
+    expect(res.status).toBe(401);
+  });
+
+  it("POST /token/rotate rejects when the token is fixed via EDIT_TOKEN", async () => {
+    const app = createApp({ editToken: TOKEN, overridesFile });
+    const res = await request(app)
+      .post("/token/rotate")
+      .set("Authorization", `Bearer ${TOKEN}`);
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /token/rotate issues a new token, persists it, and invalidates the old one", async () => {
+    const app = createApp({ editToken: TOKEN, overridesFile, tokenFile });
+
+    const rotate = await request(app)
+      .post("/token/rotate")
+      .set("Authorization", `Bearer ${TOKEN}`);
+    expect(rotate.status).toBe(200);
+    const newToken = rotate.body.token;
+    expect(newToken).toBeTruthy();
+    expect(newToken).not.toBe(TOKEN);
+
+    const withOldToken = await request(app)
+      .post("/overrides")
+      .set("Authorization", `Bearer ${TOKEN}`)
+      .send({ changes: { a: "1" } });
+    expect(withOldToken.status).toBe(401);
+
+    const withNewToken = await request(app)
+      .post("/overrides")
+      .set("Authorization", `Bearer ${newToken}`)
+      .send({ changes: { a: "1" } });
+    expect(withNewToken.status).toBe(200);
+
+    const persisted = await fs.readFile(tokenFile, "utf8");
+    expect(persisted.trim()).toBe(newToken);
+  });
+});

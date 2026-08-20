@@ -45,6 +45,10 @@ A small, unobtrusive bar sits bottom-left, visible only to signed-in admins:
   click it to bring the full bar back. Visiting the page with `#editbar` in
   the URL always force-opens it, even if it was left collapsed, without
   needing to retype the token.
+- **⚙** opens a Settings panel with the current admin token (masked by
+  default), one-click copy of the token or a ready-to-share admin link, and
+  a **Rotate token** button that invalidates every other copy of the link
+  immediately.
 - Regular visitors never see the bar and never touch anything but the
   published text.
 
@@ -54,24 +58,43 @@ A small, unobtrusive bar sits bottom-left, visible only to signed-in admins:
 git clone <this repo>
 cd editbar
 npm install
-EDIT_TOKEN=choose-a-real-secret npm run dev
+npm run dev
 ```
 
-This starts the reference server on `http://localhost:4000`, serving:
+No `EDIT_TOKEN` needed — on first run the server generates a strong random
+admin token itself, saves it to `packages/server/data/token.txt`, and prints
+it to the console along with a ready-to-use admin URL. Reuse the same
+command later and it picks the saved token back up.
+
+The server listens on `http://localhost:4000` and serves:
 
 - `GET /widget.js` — the widget script
 - `GET /overrides.json` — the current published text (public)
 - `GET /config` — plan/feature flags the widget can branch on (`{ plan, features }`)
+- `GET /setup` — a one-time setup page showing the token and embed snippet
+  (see "Provisioning the admin token" below)
 - `POST /overrides` — save changes (requires `Authorization: Bearer <token>`, rate-limited, capped payload size)
+- `POST /token/rotate` — issue a new token, invalidating the old one (requires the current token)
 - `GET /demo` — a working vanilla HTML example
 
-Outside local development, the server refuses to start unless `EDIT_TOKEN`
-is set (`NODE_ENV=production node packages/server/src/index.js` without a
-token exits immediately rather than falling back to an insecure default).
+Open `/demo` without a token to see the page exactly as any visitor sees it
+(no bar); the console output from `npm run dev` gives you the admin URL to
+open instead. If you'd rather set the token yourself, `EDIT_TOKEN=choose-a-real-secret npm run dev`
+skips auto-provisioning entirely (and disables the rotate endpoint, since
+the environment variable is then the source of truth).
 
-Open `http://localhost:4000/demo?edit_token=choose-a-real-secret` to try it
-as an admin. Opening `/demo` without the token shows the page exactly as any
-visitor sees it — no bar.
+### Provisioning the admin token
+
+- **First run**: the console prints the generated token and a link to
+  `/setup` — a small page with the token (copy button) and the exact embed
+  snippet. For remote/non-localhost visitors this page is one-time: once
+  viewed (or after 15 minutes, whichever comes first) it stops showing the
+  token and points back to the console output instead. Requests from
+  localhost can always reach it — handy while you're still setting things up
+  directly on the machine running the server.
+- **Later**: once you've activated the bar once with `?edit_token=...`, the
+  Settings panel (⚙) is the ongoing way to see, copy, or rotate the token —
+  no need to go back to `/setup` or the console.
 
 The same widget, dropped in unmodified, also runs in:
 
@@ -122,7 +145,8 @@ The reference server (`packages/server`) reads these environment variables:
 | Variable         | Default                          | Description                                   |
 | ---------------- | --------------------------------- | ---------------------------------------------- |
 | `PORT`            | `4000`                            | Port the server listens on                     |
-| `EDIT_TOKEN`      | `dev-token` (insecure, dev only)  | Shared secret required to save changes         |
+| `EDIT_TOKEN`      | *(auto-generated if unset)*       | Shared secret required to save changes. Set this yourself to disable auto-provisioning and the rotate endpoint. |
+| `TOKEN_FILE`      | `packages/server/data/token.txt`  | Where the auto-generated/rotated token is persisted (ignored if `EDIT_TOKEN` is set) |
 | `OVERRIDES_FILE`  | `packages/server/data/overrides.json` | Where published text is stored              |
 
 ## Self-hosting
