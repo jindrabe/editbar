@@ -1,0 +1,30 @@
+name: Bug report
+description: Something in the widget, server, or an example doesn't work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect instead?
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where did it happen?
+      description: Which example/browser/framework, or your own site's stack
+      placeholder: "e.g. examples/react-app, Chrome 128, Next.js 14 site"
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant console/server output
+      render: shell

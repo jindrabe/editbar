@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Editbar demo — vanilla HTML</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+      max-width: 640px;
+      margin: 10vh auto;
+      padding: 0 24px;
+      line-height: 1.5;
+    }
+    h1 { font-size: 2.25rem; margin-bottom: 8px; }
+    p.subtitle { font-size: 1.1rem; opacity: 0.7; margin-top: 0; }
+    .cta {
+      display: inline-block;
+      margin-top: 24px;
+      padding: 12px 20px;
+      border-radius: 10px;
+      background: #0a84ff;
+      color: white;
+      text-decoration: none;
+      font-weight: 600;
+    }
+    .note {
+      margin-top: 48px;
+      padding-top: 16px;
+      border-top: 1px solid rgba(127,127,127,0.3);
+      font-size: 0.85rem;
+      opacity: 0.7;
+    }
+    .note a { color: inherit; }
+  </style>
+</head>
+<body>
+  <h1 data-edit-id="hero.title">Welcome to Acme Studio</h1>
+  <p class="subtitle" data-edit-id="hero.subtitle">
+    We design and build websites that customers actually enjoy using.
+  </p>
+  <p data-edit-id="hero.body">
+    This paragraph — like the heading, the subtitle, and the button below —
+    can be edited directly on the page by anyone signed in as an admin,
+    without touching any code.
+  </p>
+  <a class="cta" href="#" data-edit-id="hero.cta">Get in touch</a>
+
+  <p class="note">
+    This is the Editbar demo page. Open it
+    <a href="?edit_token=dev-token">as an admin</a> to see the floating
+    edit bar (bottom-left). The token used here matches the server's
+    default dev <code>EDIT_TOKEN</code> — set your own in production.
+  </p>
+
+  <script src="/widget.js" defer></script>
+</body>
+</html>

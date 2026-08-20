@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Editbar demo — React</title>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+  <!--
+    The editbar widget is plain, dependency-free JS — it works the same
+    way here as on the vanilla HTML example, with zero React-specific
+    integration. data-api points at the reference server since this app
+    runs on its own dev port.
+  -->
+  <script src="http://localhost:4000/widget.js" data-api="http://localhost:4000" defer></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+name: Feature request
+description: Suggest an addition to the open-source core
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+  - type: markdown
+    attributes:
+      value: |
+        Note: features that require a managed backend (team roles, approval
+        workflows, SSO, multi-site dashboards) are intentionally part of the
+        hosted product, not the OSS core — see the Roadmap section in the
+        [README](../../README.md). Core feature requests should keep working
+        with a single self-hosted server and a flat overrides file.

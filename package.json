@@ -1,0 +1,24 @@
+{
+  "name": "editbar",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "examples/react-app",
+    "examples/vue-app",
+    "examples/astro-app"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @editbar/server",
+    "dev:react": "npm run dev -w editbar-example-react",
+    "dev:vue": "npm run dev -w editbar-example-vue",
+    "dev:astro": "npm run dev -w editbar-example-astro",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.11"
+  }
+}

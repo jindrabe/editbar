@@ -1,0 +1,27 @@
+{
+  "name": "@editbar/widget",
+  "version": "0.1.0",
+  "description": "Drop-in floating admin bar for editing website text in place — no build step, no framework dependency.",
+  "type": "module",
+  "main": "src/widget.js",
+  "files": [
+    "src/widget.js"
+  ],
+  "keywords": [
+    "inline-editing",
+    "wysiwyg",
+    "visual-editor",
+    "content-management",
+    "cms",
+    "no-code",
+    "admin-bar",
+    "website-editor",
+    "self-hosted"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/editbar/editbar.git",
+    "directory": "packages/widget"
+  }
+}

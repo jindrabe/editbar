@@ -1,0 +1,39 @@
+---
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Editbar demo — Astro</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+        max-width: 640px;
+        margin: 10vh auto;
+        padding: 0 24px;
+        line-height: 1.5;
+      }
+      h1 { font-size: 2.25rem; }
+      .note { margin-top: 48px; font-size: 0.85rem; opacity: 0.7; }
+    </style>
+  </head>
+  <body>
+    <h1 data-edit-id="astro.title">Built with Astro, edited without code</h1>
+    <p data-edit-id="astro.subtitle">
+      This page is server-rendered to plain HTML at build time — data-edit-id
+      survives that step unchanged, same as it survives React's or Vue's
+      compiler.
+    </p>
+    <p data-edit-id="astro.body">
+      No Astro-specific integration is used here — just the widget script
+      tag, same as every other example.
+    </p>
+    <p class="note">
+      Open this page with <code>?edit_token=dev-token</code> appended to the
+      URL to try the admin bar (make sure the reference server is running on
+      port 4000).
+    </p>
+    <script src="http://localhost:4000/widget.js" data-api="http://localhost:4000" defer></script>
+  </body>
+</html>

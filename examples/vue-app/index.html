@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Editbar demo — Vue</title>
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+  <!--
+    Same widget, same server, no Vue-specific integration — data-edit-id
+    is just a plain HTML attribute, so it survives Vue's template compiler
+    untouched.
+  -->
+  <script src="http://localhost:4000/widget.js" data-api="http://localhost:4000" defer></script>
+</body>
+</html>

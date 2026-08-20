@@ -1,0 +1,17 @@
+{
+  "name": "@editbar/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "@editbar/core": "*",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^8.6.2"
+  },
+  "license": "MIT"
+}
