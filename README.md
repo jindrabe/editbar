@@ -2,7 +2,7 @@
 
 **A floating admin bar that lets you edit any text on your website in place — no CMS migration, no code changes, works on any frontend stack.**
 
-[![CI](https://github.com/editbar/editbar/actions/workflows/ci.yml/badge.svg)](https://github.com/editbar/editbar/actions/workflows/ci.yml)
+[![CI](https://github.com/jindrabe/editbar/actions/workflows/ci.yml/badge.svg)](https://github.com/jindrabe/editbar/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D18-339933.svg)](package.json)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -131,6 +131,17 @@ widget's `data-api` attribute at wherever you deploy it:
 
 ```html
 <script src="https://your-editbar-server.example.com/widget.js"
+        data-api="https://your-editbar-server.example.com"
+        defer></script>
+```
+
+You can also load the script itself straight from this repo via jsDelivr's
+GitHub CDN, instead of serving it from your own backend — only `data-api`
+needs to point at wherever you run the actual API (`/overrides.json`,
+`/overrides`, `/config`):
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/jindrabe/editbar@main/packages/widget/src/widget.js"
         data-api="https://your-editbar-server.example.com"
         defer></script>
 ```

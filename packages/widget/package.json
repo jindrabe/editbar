@@ -1,5 +1,5 @@
 {
-  "name": "@editbar/widget",
+  "name": "editbar-widget",
   "version": "0.1.0",
   "description": "Drop-in floating admin bar for editing website text in place — no build step, no framework dependency.",
   "type": "module",
@@ -21,7 +21,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/editbar/editbar.git",
+    "url": "git+https://github.com/jindrabe/editbar.git",
     "directory": "packages/widget"
   }
 }
