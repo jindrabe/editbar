@@ -81,6 +81,16 @@ export function createApp({
     legacyHeaders: false,
     ...rateLimitOptions,
   });
+  // Tighter than saveLimiter — rotating invalidates the current token for
+  // everyone still using it, so it's a higher-consequence action than a
+  // normal save and doesn't need the same headroom.
+  const rotateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    ...rateLimitOptions,
+  });
 
   if (widgetFile) {
     app.get("/widget.js", (req, res) => {
@@ -158,7 +168,7 @@ export function createApp({
     res.type("text/html").send(renderSetupPage(currentToken, origin));
   });
 
-  app.post("/token/rotate", saveLimiter, async (req, res) => {
+  app.post("/token/rotate", rotateLimiter, async (req, res) => {
     const auth = req.get("authorization") || "";
     const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
     if (!verifyToken(token, currentToken)) {

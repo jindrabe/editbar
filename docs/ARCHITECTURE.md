@@ -56,6 +56,7 @@
 - The bar's visibility in the UI is **cosmetic only** — it's gated by a token in `localStorage`, which any visitor could technically set. The actual protection is that `POST /overrides` independently verifies the token server-side; a hidden or spoofed bar can never write without the real token.
 - Saved text is inserted via `textContent`, never `innerHTML` — an admin (or anyone who guessed/leaked a token) can only ever change what visitors *read*, not inject markup or scripts.
 - CORS on the reference server is intentionally permissive, since the whole point is that the widget can be embedded on any origin; the bearer token (not a cookie) is what's actually gating writes, so a wildcard `Access-Control-Allow-Origin` doesn't weaken that.
+- **The admin token lives in `localStorage` on your own site, with no expiry and no origin/path scoping.** This is an inherent tradeoff of the shared-secret model, not a bug: if your site has an *unrelated* XSS vulnerability of its own, that XSS can read `localStorage.getItem('editbar_token')` and gain full write access to your published text — the same way it could read any other secret you kept in `localStorage`. Editbar doesn't introduce this risk, but it doesn't shield you from it either. Keep your own site free of XSS, treat the admin link (and the "Copy admin link" feature) like a password — don't paste it into chat or a public issue — and rotate the token (Settings panel → Rotate) if you suspect it leaked.
 
 ## Token provisioning
 
