@@ -245,6 +245,15 @@
   function saveChanges() {
     var changes = state.drafts;
     if (Object.keys(changes).length === 0) return;
+    // The page's own pre-Editbar text for each changed key, from the DOM
+    // snapshot taken before any override was ever applied (see
+    // applyPublishedAndDrafts). Sent so the backend can show "what this
+    // said originally" even for a key's very first edit — it only keeps
+    // the first copy it ever receives, so resending it here is harmless.
+    var originals = {};
+    Object.keys(changes).forEach(function (key) {
+      if (state.originals.has(key)) originals[key] = state.originals.get(key);
+    });
     setStatus("Saving…", null);
     fetch(apiBase + "/overrides", {
       method: "POST",
@@ -252,7 +261,7 @@
         "Content-Type": "application/json",
         Authorization: "Bearer " + state.token,
       },
-      body: JSON.stringify({ changes: changes }),
+      body: JSON.stringify({ changes: changes, originals: originals }),
     })
       .then(function (res) {
         if (res.status === 401) throw new Error("unauthorized");
