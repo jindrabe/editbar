@@ -23,9 +23,10 @@ export default function App() {
         too.
       </p>
       <p style={{ marginTop: 48, fontSize: "0.85rem", opacity: 0.7 }}>
-        Open this page with <code>?edit_token=dev-token</code> appended to
-        the URL to try the admin bar (make sure the reference server is
-        running on port 4000).
+        Visit <a href="http://localhost:4000/setup">localhost:4000/setup</a> for
+        your admin token and the exact link to open this page as an admin
+        (make sure the reference server is running on port 4000) — the token
+        is generated fresh per server, so there's no fixed one to hardcode.
       </p>
     </main>
   );

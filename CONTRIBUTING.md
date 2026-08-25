@@ -9,8 +9,10 @@ npm install
 npm run dev            # starts the reference server on :4000
 ```
 
-Open `http://localhost:4000/demo?edit_token=dev-token` to try the vanilla HTML
-example. The default token is `dev-token` unless you set `EDIT_TOKEN` yourself.
+Open `http://localhost:4000/setup` for your admin token and the exact link to
+try the vanilla HTML demo as an admin — the server generates a fresh random
+token per install (see `docs/ARCHITECTURE.md`), so there's no fixed one to
+hardcode.
 
 To run a framework example alongside it:
 
