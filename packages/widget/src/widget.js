@@ -562,6 +562,16 @@
 
   // ---- Bar UI (Shadow DOM) ----------------------------------------------
 
+  // Feather Icons' "settings" gear (MIT) — replaces the plain "⚙" glyph,
+  // which rendered inconsistently across platforms/fonts.
+  var GEAR_ICON =
+    '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>';
+
+  // Same mark as the Editbar dashboard/favicon (see BRAND_MARK_DEFS in the
+  // hosted app's pages.js) — one visual identity across product surfaces.
+  var BRAND_ICON =
+    '<svg width="14" height="14" viewBox="0 0 40 40"><rect width="40" height="40" rx="11" fill="#0a84ff"></rect><rect x="10" y="13.5" width="15" height="4" rx="2" fill="#fff"></rect><rect x="10" y="22.5" width="9.5" height="4" rx="2" fill="#fff" opacity=".75"></rect><rect x="27.5" y="11.5" width="3.2" height="17" rx="1.6" fill="#fff"></rect></svg>';
+
   var STYLE = `
     :host { all: initial; }
     @keyframes editbar-in {
@@ -664,14 +674,28 @@
       box-shadow: none;
     }
     button.primary:disabled:hover { background: #0a84ff; }
-    button.icon {
+    button.icon, a.icon {
       padding: 7px 9px;
       font-size: 14px;
       line-height: 1;
       opacity: 0.6;
       margin-right: 2px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
     }
-    button.icon:hover { opacity: 1; }
+    button.icon:hover, a.icon:hover { opacity: 1; }
+    a.icon {
+      border-radius: 16px;
+      cursor: pointer;
+      text-decoration: none;
+      color: inherit;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    a.icon:hover { background: rgba(0,0,0,0.06); }
+    @media (prefers-color-scheme: dark) {
+      a.icon:hover { background: rgba(255,255,255,0.12); }
+    }
     .status {
       padding: 0 8px;
       opacity: 0.7;
@@ -900,7 +924,16 @@
     var saveBtn = h("button", { class: "primary" }, "Save changes");
     var discardBtn = h("button", {}, "Discard");
     var status = h("span", { class: "status" });
-    var settingsBtn = h("button", { class: "icon", title: "Settings" }, "⚙");
+    var settingsBtn = h("button", { class: "icon", title: "Settings" });
+    settingsBtn.innerHTML = GEAR_ICON;
+    var brandLink = h("a", {
+      class: "icon",
+      href: "https://editbar.online",
+      target: "_blank",
+      rel: "noopener noreferrer",
+      title: "Made with Editbar",
+    });
+    brandLink.innerHTML = BRAND_ICON;
     var collapseBtn = h("button", { class: "icon", title: "Collapse" }, "✕");
 
     editBtn.addEventListener("click", function () {
@@ -963,6 +996,7 @@
     bar.appendChild(groupRight);
     bar.appendChild(h("div", { class: "divider" }));
     bar.appendChild(settingsBtn);
+    bar.appendChild(brandLink);
     bar.appendChild(collapseBtn);
     shadow.appendChild(bar);
 
