@@ -24,6 +24,15 @@
     panelOpen: false,
     tokenRevealed: false,
     originals: new Map(), // edit-id -> text present in the DOM before any override
+    // Hosted-only extras below — every fetch that populates these degrades
+    // silently (see fetchConfig/fetchBaseline/fetchBlame), so a self-hosted
+    // server that doesn't implement these routes just leaves them at their
+    // default and the widget behaves exactly as it always has.
+    richContent: false, // from /config's features.richContent
+    baseline: {}, // edit-id -> updated_at, from /overrides-meta.json
+    blame: {}, // edit-id -> { email, at }, from /blame.json
+    activeEditors: [], // from /presence
+    conflicts: null, // array of { editId, serverValue, serverUpdatedAt } while a save is blocked
   };
 
   var els = {}; // filled in by createBar()
@@ -116,7 +125,15 @@
   }
 
   function applyText(el, key, text) {
-    if (el.textContent !== text) el.textContent = text;
+    // Values only ever reach here after server-side sanitization at save
+    // time (see the hosted server's richContent handling) — a site without
+    // richContent never sets state.richContent, so this stays textContent
+    // exactly as before, unconditionally, for every plan and self-hosted.
+    if (state.richContent) {
+      if (el.innerHTML !== text) el.innerHTML = text;
+    } else if (el.textContent !== text) {
+      el.textContent = text;
+    }
   }
 
   function applyPublishedAndDrafts() {
@@ -144,6 +161,117 @@
       .catch(function () {
         state.published = state.published || {};
       });
+  }
+
+  // Hosted-only — a self-hosted server 404s here, which just leaves
+  // richContent off (identical to today's plain-text-only behavior).
+  function fetchConfig() {
+    return fetch(apiBase + "/config", { credentials: "omit" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("no config");
+        return res.json();
+      })
+      .then(function (data) {
+        state.richContent = !!(data && data.features && data.features.richContent);
+      })
+      .catch(function () {
+        state.richContent = false;
+      });
+  }
+
+  // { editId: updatedAt } for every field currently on the page — echoed
+  // back on save so the server can tell a genuine race from a normal save.
+  // A field with no stored value yet still gets an entry (null), so even
+  // its very first save is checked against "nobody else touched this
+  // either" rather than skipping the check just because we've never seen a
+  // timestamp for it. Missing entirely on self-hosted (fetch fails), in
+  // which case saves simply never carry a baseline and conflict checking is
+  // skipped, same as before this feature existed.
+  function fetchBaseline() {
+    return fetch(apiBase + "/overrides-meta.json", { credentials: "omit" })
+      .then(function (res) {
+        if (!res.ok) throw new Error("no meta");
+        return res.json();
+      })
+      .then(function (data) {
+        data = data || {};
+        var baseline = {};
+        editableElements().forEach(function (el) {
+          var key = el.getAttribute("data-edit-id");
+          baseline[key] = Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null;
+        });
+        state.baseline = baseline;
+      })
+      .catch(function () {
+        state.baseline = state.baseline || {};
+      });
+  }
+
+  function timeAgo(ts) {
+    var diffMin = Math.floor((Date.now() - ts) / 60000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return diffMin + "m ago";
+    var diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return diffHr + "h ago";
+    return Math.floor(diffHr / 24) + "d ago";
+  }
+
+  // "Who last published this, and when" as a native title tooltip on each
+  // field — requires the admin token (same trust boundary as saving), so
+  // only fetched once the bar is up.
+  function fetchBlame() {
+    var keys = editableElements().map(function (el) {
+      return el.getAttribute("data-edit-id");
+    });
+    if (!keys.length) return Promise.resolve();
+    return fetch(apiBase + "/blame.json?keys=" + encodeURIComponent(keys.join(",")), {
+      headers: { Authorization: "Bearer " + state.token },
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("no blame");
+        return res.json();
+      })
+      .then(function (data) {
+        state.blame = data || {};
+        applyBlameTitles();
+      })
+      .catch(function () {
+        state.blame = state.blame || {};
+      });
+  }
+
+  function applyBlameTitles() {
+    editableElements().forEach(function (el) {
+      var info = state.blame[el.getAttribute("data-edit-id")];
+      if (info && info.email) {
+        el.title = "Last changed by " + info.email + " · " + timeAgo(info.at);
+      }
+    });
+  }
+
+  var presenceTimer = null;
+
+  function heartbeatPresence() {
+    fetch(apiBase + "/presence", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + state.token },
+    })
+      .then(function (res) {
+        if (!res.ok) throw new Error("no presence");
+        return res.json();
+      })
+      .then(function (data) {
+        state.activeEditors = (data && data.editors) || [];
+        renderPresence();
+      })
+      .catch(function () {
+        /* self-hosted or a transient failure — leave the last known state */
+      });
+  }
+
+  function startPresenceHeartbeat() {
+    heartbeatPresence();
+    presenceTimer = setInterval(heartbeatPresence, 30000);
   }
 
   // ---- Edit-mode DOM behavior ------------------------------------------
@@ -200,7 +328,7 @@
 
   function commitDraft(el) {
     var key = el.getAttribute("data-edit-id");
-    var text = el.textContent;
+    var text = state.richContent ? el.innerHTML : el.textContent;
     var base = committedValue(key, el);
     if (text === base) {
       delete state.drafts[key];
@@ -254,16 +382,36 @@
     Object.keys(changes).forEach(function (key) {
       if (state.originals.has(key)) originals[key] = state.originals.get(key);
     });
+    // Only for keys we actually have a known updated_at for (from
+    // fetchBaseline) — an unmodified/self-hosted baseline of {} means every
+    // save skips conflict checking entirely, matching prior behavior.
+    var baseline = {};
+    Object.keys(changes).forEach(function (key) {
+      if (Object.prototype.hasOwnProperty.call(state.baseline, key)) {
+        baseline[key] = state.baseline[key];
+      }
+    });
     setStatus("Saving…", null);
+    postOverrides(changes, originals, baseline);
+  }
+
+  function postOverrides(changes, originals, baseline) {
     fetch(apiBase + "/overrides", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + state.token,
       },
-      body: JSON.stringify({ changes: changes, originals: originals }),
+      body: JSON.stringify({ changes: changes, originals: originals, baseline: baseline }),
     })
       .then(function (res) {
+        if (res.status === 409) {
+          return res.json().then(function (body) {
+            var err = new Error("conflict");
+            err.conflicts = (body && body.conflicts) || [];
+            throw err;
+          });
+        }
         if (res.status === 401) throw new Error("unauthorized");
         if (!res.ok) throw new Error("save failed");
         return res.json();
@@ -273,14 +421,51 @@
         clearDrafts();
         setStatus("Saved", "ok");
         renderBarState();
+        fetchBaseline();
       })
       .catch(function (err) {
+        if (err && err.message === "conflict") {
+          state.conflicts = err.conflicts;
+          renderConflictState();
+          setStatus("", null);
+          return;
+        }
         var msg =
           err.message === "unauthorized"
             ? "Invalid token"
             : "Could not save changes";
         setStatus(msg, "error");
       });
+  }
+
+  // The whole save was rejected atomically (nothing written) — "keep mine"
+  // just bumps the conflicting keys' baseline to what the server now has
+  // and retries the exact same drafts, so this time they pass.
+  function resolveConflictKeepMine() {
+    if (!state.conflicts) return;
+    state.conflicts.forEach(function (c) {
+      state.baseline[c.editId] = c.serverUpdatedAt;
+    });
+    state.conflicts = null;
+    renderConflictState();
+    saveChanges();
+  }
+
+  function resolveConflictKeepTheirs() {
+    if (!state.conflicts) return;
+    state.conflicts.forEach(function (c) {
+      delete state.drafts[c.editId];
+      var el = editableElements().filter(function (e) {
+        return e.getAttribute("data-edit-id") === c.editId;
+      })[0];
+      if (el) applyText(el, c.editId, c.serverValue || "");
+    });
+    saveDrafts();
+    state.conflicts = null;
+    renderConflictState();
+    renderBarState();
+    fetchBaseline();
+    if (Object.keys(state.drafts).length > 0) saveChanges();
   }
 
   function collapse() {
@@ -627,6 +812,65 @@
     button.full { width: 100%; }
     button.danger { color: #ff3b30; }
     .panel .status { padding: 0; }
+    .presence {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      margin-left: 2px;
+      border-radius: 9px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(10,132,255,0.16);
+      color: #0a84ff;
+    }
+    .conflict {
+      position: fixed;
+      left: 16px;
+      bottom: 68px;
+      z-index: 2147483647;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      width: 280px;
+      padding: 14px;
+      border-radius: 18px;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", system-ui, sans-serif;
+      font-size: 13px;
+      color: #1c1c1e;
+      background: rgba(255, 214, 170, 0.85);
+      backdrop-filter: blur(28px) saturate(1.9);
+      -webkit-backdrop-filter: blur(28px) saturate(1.9);
+      box-shadow:
+        0 0 0 0.5px rgba(0,0,0,0.05),
+        inset 0 1px 0 rgba(255,255,255,0.7),
+        0 2px 6px rgba(0,0,0,0.06),
+        0 12px 32px rgba(0,0,0,0.16);
+      animation: editbar-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @media (prefers-color-scheme: dark) {
+      .conflict {
+        color: #f2f2f7;
+        background: rgba(90, 58, 20, 0.85);
+        box-shadow:
+          0 0 0 0.5px rgba(0,0,0,0.3),
+          inset 0 1px 0 rgba(255,255,255,0.12),
+          0 2px 6px rgba(0,0,0,0.3),
+          0 12px 32px rgba(0,0,0,0.45);
+      }
+    }
+    .conflict-title { font-weight: 600; }
+    .conflict-list { display: flex; flex-direction: column; gap: 4px; }
+    .conflict-row {
+      font-size: 12px;
+      opacity: 0.85;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .conflict-actions { display: flex; gap: 8px; }
   `;
 
   function h(tag, attrs, text) {
@@ -652,6 +896,7 @@
     var bar = h("div", { class: "bar" });
     var dot = h("span", { class: "dot" });
     var editBtn = h("button", {}, "Edit");
+    var presence = h("span", { class: "presence" });
     var saveBtn = h("button", { class: "primary" }, "Save changes");
     var discardBtn = h("button", {}, "Discard");
     var status = h("span", { class: "status" });
@@ -669,6 +914,42 @@
     var groupLeft = h("div", { class: "group" });
     groupLeft.appendChild(dot);
     groupLeft.appendChild(editBtn);
+    groupLeft.appendChild(presence);
+
+    // Only meaningful once fetchConfig() confirms the site is on a
+    // richContent plan — hidden otherwise, and its buttons are inert
+    // no-ops when nothing is focused/contenteditable.
+    var richDivider = h("div", { class: "divider" });
+    var richToolbar = h("div", { class: "group" });
+    var boldBtn = h("button", { class: "icon", title: "Bold" }, "B");
+    var italicBtn = h("button", { class: "icon", title: "Italic" }, "I");
+    var linkBtn = h("button", { class: "icon", title: "Insert link" }, "🔗");
+    var imageBtn = h("button", { class: "icon", title: "Insert image" }, "🖼");
+    [boldBtn, italicBtn, linkBtn, imageBtn].forEach(function (btn) {
+      // Without this, the mousedown itself blurs the contenteditable field
+      // before click fires, losing the text selection execCommand needs.
+      btn.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+      });
+    });
+    boldBtn.addEventListener("click", function () {
+      document.execCommand("bold");
+    });
+    italicBtn.addEventListener("click", function () {
+      document.execCommand("italic");
+    });
+    linkBtn.addEventListener("click", function () {
+      var url = window.prompt("Link URL:");
+      if (url) document.execCommand("createLink", false, url);
+    });
+    imageBtn.addEventListener("click", function () {
+      var url = window.prompt("Image URL:");
+      if (url) document.execCommand("insertImage", false, url);
+    });
+    richToolbar.appendChild(boldBtn);
+    richToolbar.appendChild(italicBtn);
+    richToolbar.appendChild(linkBtn);
+    richToolbar.appendChild(imageBtn);
 
     var groupRight = h("div", { class: "group" });
     groupRight.appendChild(saveBtn);
@@ -676,12 +957,29 @@
     groupRight.appendChild(status);
 
     bar.appendChild(groupLeft);
+    bar.appendChild(richDivider);
+    bar.appendChild(richToolbar);
     bar.appendChild(h("div", { class: "divider" }));
     bar.appendChild(groupRight);
     bar.appendChild(h("div", { class: "divider" }));
     bar.appendChild(settingsBtn);
     bar.appendChild(collapseBtn);
     shadow.appendChild(bar);
+
+    var conflictBox = h("div", { class: "conflict" });
+    var conflictTitle = h("div", { class: "conflict-title" }, "Someone else changed this");
+    var conflictList = h("div", { class: "conflict-list" });
+    var conflictActions = h("div", { class: "conflict-actions" });
+    var keepMineBtn = h("button", { class: "small" }, "Use mine anyway");
+    var keepTheirsBtn = h("button", { class: "small danger" }, "Keep theirs");
+    keepMineBtn.addEventListener("click", resolveConflictKeepMine);
+    keepTheirsBtn.addEventListener("click", resolveConflictKeepTheirs);
+    conflictActions.appendChild(keepMineBtn);
+    conflictActions.appendChild(keepTheirsBtn);
+    conflictBox.appendChild(conflictTitle);
+    conflictBox.appendChild(conflictList);
+    conflictBox.appendChild(conflictActions);
+    shadow.appendChild(conflictBox);
 
     var tab = h("button", { class: "tab", title: "Open Editbar" }, "✏️");
     var tabBadge = h("span", { class: "badge" });
@@ -753,9 +1051,16 @@
       saveBtn,
       discardBtn,
       status,
+      presence,
+      richDivider,
+      richToolbar,
+      conflictBox,
+      conflictList,
     };
     renderBarState();
     renderPanelState();
+    renderConflictState();
+    renderPresence();
   }
 
   function setStatus(text, kind) {
@@ -785,6 +1090,43 @@
     els.bar.style.display = state.collapsed ? "none" : "flex";
     els.tab.style.display = state.collapsed ? "flex" : "none";
     els.tabBadge.style.display = draftCount > 0 ? "block" : "none";
+
+    var showRichToolbar = state.richContent && state.editing;
+    els.richDivider.style.display = showRichToolbar ? "block" : "none";
+    els.richToolbar.style.display = showRichToolbar ? "flex" : "none";
+  }
+
+  function renderPresence() {
+    if (!els.presence) return;
+    var n = state.activeEditors.length;
+    if (n === 0) {
+      els.presence.style.display = "none";
+      return;
+    }
+    els.presence.style.display = "inline-flex";
+    els.presence.textContent = "+" + n;
+    els.presence.title =
+      state.activeEditors
+        .map(function (e) {
+          return e.email;
+        })
+        .join(", ") + (n === 1 ? " is" : " are") + " also editing";
+  }
+
+  function renderConflictState() {
+    if (!els.conflictBox) return;
+    var conflicts = state.conflicts;
+    if (!conflicts || !conflicts.length) {
+      els.conflictBox.style.display = "none";
+      return;
+    }
+    els.conflictBox.style.display = "flex";
+    els.conflictList.textContent = "";
+    conflicts.forEach(function (c) {
+      els.conflictList.appendChild(
+        h("div", { class: "conflict-row" }, c.editId + ": " + (c.serverValue || "(empty)"))
+      );
+    });
   }
 
   function maskToken(token) {
@@ -829,9 +1171,14 @@
       true
     );
 
-    fetchPublished().then(function () {
+    Promise.all([fetchPublished(), fetchConfig()]).then(function () {
       applyPublishedAndDrafts();
-      if (state.token) createBar();
+      if (state.token) {
+        createBar();
+        fetchBaseline();
+        fetchBlame();
+        startPresenceHeartbeat();
+      }
     });
   }
 
