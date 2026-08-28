@@ -33,6 +33,14 @@
     blame: {}, // edit-id -> { email, at }, from /blame.json
     activeEditors: [], // from /presence
     conflicts: null, // array of { editId, serverValue, serverUpdatedAt } while a save is blocked
+    // Plan-gating fields — a self-hosted server (or any /config response
+    // missing these) MUST leave editing fully unblocked, so `active`
+    // defaults true and everything else defaults to "no gate applies".
+    active: true, // from /config's `active` — the single source of truth for whether editing is allowed at all
+    planStatus: "active", // from /config's `status` ("active" | "trialing" | "inactive" | "canceled")
+    trialEndsAt: null, // from /config's `trialEndsAt`, ms epoch, only set while trialing
+    isOwner: false, // from /config's `isOwner` — whether this token belongs to the site's owner
+    accountUrl: null, // from /config's `accountUrl` — only meaningful/shown when isOwner
   };
 
   var els = {}; // filled in by createBar()
@@ -164,19 +172,52 @@
   }
 
   // Hosted-only — a self-hosted server 404s here, which just leaves
-  // richContent off (identical to today's plain-text-only behavior).
+  // richContent off (identical to today's plain-text-only behavior) and
+  // every plan-gating field at its safe "always active" default below.
   function fetchConfig() {
-    return fetch(apiBase + "/config", { credentials: "omit" })
+    return fetch(apiBase + "/config", {
+      credentials: "omit",
+      headers: state.token ? { Authorization: "Bearer " + state.token } : {},
+    })
       .then(function (res) {
         if (!res.ok) throw new Error("no config");
         return res.json();
       })
       .then(function (data) {
-        state.richContent = !!(data && data.features && data.features.richContent);
+        data = data || {};
+        state.richContent = !!(data.features && data.features.richContent);
+        // Missing entirely (self-hosted, or any older/partial response)
+        // MUST mean "always active" — `!!data.active` would instead default
+        // an absent field to `false` and silently lock every self-hosted
+        // install out of editing. `undefined !== false` is `true`, which is
+        // exactly the fallback this needs.
+        state.active = data.active !== false;
+        state.planStatus = data.status || "active";
+        state.trialEndsAt = typeof data.trialEndsAt === "number" ? data.trialEndsAt : null;
+        state.isOwner = !!data.isOwner;
+        state.accountUrl = data.accountUrl || null;
       })
       .catch(function () {
         state.richContent = false;
+        state.active = true;
+        state.planStatus = "active";
+        state.trialEndsAt = null;
+        state.isOwner = false;
+        state.accountUrl = null;
       });
+  }
+
+  var TRIAL_WARNING_WINDOW_MS = 3 * 24 * 60 * 60 * 1000; // last 3 days of the trial
+
+  function isTrialEndingSoon() {
+    var remaining = state.trialEndsAt - Date.now();
+    return (
+      state.active &&
+      state.planStatus === "trialing" &&
+      typeof state.trialEndsAt === "number" &&
+      remaining > 0 &&
+      remaining <= TRIAL_WARNING_WINDOW_MS
+    );
   }
 
   // { editId: updatedAt } for every field currently on the page — echoed
@@ -352,6 +393,7 @@
   }
 
   function setEditing(next) {
+    if (next && !state.active) return; // inactive plan: entering edit mode is a no-op
     state.editing = next;
     if (!next) lockAllEditableNow();
     document.documentElement.toggleAttribute("data-editbar-editing", next);
@@ -413,6 +455,7 @@
           });
         }
         if (res.status === 401) throw new Error("unauthorized");
+        if (res.status === 402) throw new Error("inactive");
         if (!res.ok) throw new Error("save failed");
         return res.json();
       })
@@ -428,6 +471,19 @@
           state.conflicts = err.conflicts;
           renderConflictState();
           setStatus("", null);
+          return;
+        }
+        if (err && err.message === "inactive") {
+          // Config was fetched while still active; the plan lapsed mid-
+          // session (trial expired, payment failed). Flip into the same
+          // gate a fresh page load would already show, without discarding
+          // the draft — setEditing(false) just commits it into
+          // state.drafts/localStorage like a normal "Done editing".
+          state.active = false;
+          setEditing(false);
+          renderPlanState();
+          renderBarState();
+          setStatus("Plan inactive — changes saved locally only", "error");
           return;
         }
         var msg =
@@ -895,6 +951,38 @@
       white-space: nowrap;
     }
     .conflict-actions { display: flex; gap: 8px; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    .plan-banner {
+      position: fixed;
+      left: 16px;
+      bottom: 68px;
+      z-index: 2147483647;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      max-width: 300px;
+      padding: 10px 14px;
+      border-radius: 18px;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "SF Pro Text", system-ui, sans-serif;
+      font-size: 12px;
+      line-height: 1.35;
+      color: #1c1c1e;
+      background: rgba(255, 214, 170, 0.85);
+      backdrop-filter: blur(28px) saturate(1.9);
+      -webkit-backdrop-filter: blur(28px) saturate(1.9);
+      box-shadow:
+        0 0 0 0.5px rgba(0,0,0,0.05),
+        inset 0 1px 0 rgba(255,255,255,0.7),
+        0 2px 6px rgba(0,0,0,0.06),
+        0 12px 32px rgba(0,0,0,0.16);
+      animation: editbar-in 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .plan-banner.trial { background: rgba(200, 230, 255, 0.85); }
+    @media (prefers-color-scheme: dark) {
+      .plan-banner { color: #f2f2f7; background: rgba(90, 58, 20, 0.85); }
+      .plan-banner.trial { background: rgba(20, 55, 90, 0.85); }
+    }
+    .plan-banner-link { color: inherit; font-weight: 600; text-decoration: underline; white-space: nowrap; }
   `;
 
   function h(tag, attrs, text) {
@@ -1015,6 +1103,17 @@
     conflictBox.appendChild(conflictActions);
     shadow.appendChild(conflictBox);
 
+    var planBanner = h("div", { class: "plan-banner" });
+    var planBannerText = h("span", { class: "plan-banner-text" });
+    var planBannerLink = h(
+      "a",
+      { class: "plan-banner-link", target: "_blank", rel: "noopener noreferrer" },
+      "Manage plan"
+    );
+    planBanner.appendChild(planBannerText);
+    planBanner.appendChild(planBannerLink);
+    shadow.appendChild(planBanner);
+
     var tab = h("button", { class: "tab", title: "Open Editbar" }, "✏️");
     var tabBadge = h("span", { class: "badge" });
     tab.appendChild(tabBadge);
@@ -1090,10 +1189,14 @@
       richToolbar,
       conflictBox,
       conflictList,
+      planBanner,
+      planBannerText,
+      planBannerLink,
     };
     renderBarState();
     renderPanelState();
     renderConflictState();
+    renderPlanState();
     renderPresence();
   }
 
@@ -1115,6 +1218,7 @@
     if (!els.editBtn) return;
     var draftCount = Object.keys(state.drafts).length;
     els.editBtn.textContent = state.editing ? "Done editing" : "Edit";
+    els.editBtn.disabled = !state.active;
     els.dot.classList.toggle("editing", state.editing);
     els.saveBtn.disabled = draftCount === 0;
     els.saveBtn.textContent =
@@ -1161,6 +1265,42 @@
         h("div", { class: "conflict-row" }, c.editId + ": " + (c.serverValue || "(empty)"))
       );
     });
+  }
+
+  // Blocking (inactive) takes priority over the informational (trial-ending)
+  // state, since the two can never legitimately co-occur — inactive means
+  // the writable window has already closed, ending-soon means it hasn't yet.
+  function renderPlanState() {
+    if (!els.planBanner) return;
+    if (!state.active) {
+      els.planBanner.className = "plan-banner inactive";
+      els.planBanner.style.display = "flex";
+      if (state.isOwner) {
+        els.planBannerText.textContent = "This site's plan isn't active — editing is paused.";
+        els.planBannerLink.style.display = "inline";
+        els.planBannerLink.href = state.accountUrl || "#";
+      } else {
+        els.planBannerText.textContent = "Editing is paused. Ask the site owner to reactivate the plan.";
+        els.planBannerLink.style.display = "none";
+      }
+      return;
+    }
+    if (isTrialEndingSoon()) {
+      var daysLeft = Math.max(1, Math.ceil((state.trialEndsAt - Date.now()) / 86400000));
+      var daysLabel = daysLeft + (daysLeft === 1 ? " day" : " days");
+      els.planBanner.className = "plan-banner trial";
+      els.planBanner.style.display = "flex";
+      if (state.isOwner) {
+        els.planBannerText.textContent = "Trial ends in " + daysLabel + " — add a plan to keep editing.";
+        els.planBannerLink.style.display = "inline";
+        els.planBannerLink.href = state.accountUrl || "#";
+      } else {
+        els.planBannerText.textContent = "Trial ends in " + daysLabel + ". Ask the site owner to add a plan.";
+        els.planBannerLink.style.display = "none";
+      }
+      return;
+    }
+    els.planBanner.style.display = "none";
   }
 
   function maskToken(token) {
