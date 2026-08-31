@@ -15,6 +15,21 @@ const TOKEN_FILE =
 const WIDGET_FILE = path.join(ROOT, "packages", "widget", "src", "widget.js");
 const DEMO_DIR = path.join(ROOT, "examples", "vanilla-html");
 
+// Express's own trust-proxy values: true/false, a hop count, or a subnet
+// name/list (e.g. "loopback", "10.0.0.0/8"). Needed whenever this server
+// sits behind a reverse proxy (nginx, Caddy, a PaaS edge) — without it,
+// req.ip (and the /setup loopback check) sees the proxy's own address
+// instead of the real client, which is 127.0.0.1 for any reverse proxy
+// running on the same host.
+function parseTrustProxy(value) {
+  if (value === undefined || value === "") return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
+const TRUST_PROXY = parseTrustProxy(process.env.TRUST_PROXY);
+
 let EDIT_TOKEN = process.env.EDIT_TOKEN;
 let tokenFile = null;
 
@@ -45,9 +60,15 @@ const app = createApp({
   overridesFile: OVERRIDES_FILE,
   widgetFile: WIDGET_FILE,
   demoDir: DEMO_DIR,
+  trustProxy: TRUST_PROXY,
 });
 
 app.listen(PORT, () => {
   console.log(`[editbar] server listening on http://localhost:${PORT}`);
   console.log(`[editbar] demo page: http://localhost:${PORT}/demo`);
+  if (TRUST_PROXY === undefined) {
+    console.log(
+      "[editbar] TRUST_PROXY is unset — if this server sits behind a reverse proxy (nginx, Caddy, a PaaS edge), set TRUST_PROXY so /setup can tell real remote visitors from the proxy's own loopback connection."
+    );
+  }
 });

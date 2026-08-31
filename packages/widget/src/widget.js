@@ -6,12 +6,30 @@
 (function () {
   "use strict";
 
+  // Best-effort: an ?edit_token= link is meant to be opened once, but the
+  // token still sits in the URL for every request already in flight when
+  // this (deferred) script starts running — e.g. analytics/ad beacons
+  // queued earlier in <head>. Their Referer would otherwise carry it to a
+  // third-party origin. This can't undo requests already sent, but it
+  // limits exposure for everything from this point on.
+  if (/[?&]edit_token=/.test(location.search)) {
+    var noReferrerMeta = document.createElement("meta");
+    noReferrerMeta.name = "referrer";
+    noReferrerMeta.content = "no-referrer";
+    document.head.insertBefore(noReferrerMeta, document.head.firstChild);
+  }
+
   var scriptEl =
     document.currentScript ||
     document.querySelector('script[src*="widget.js"]');
 
   var apiBase = resolveApiBase(scriptEl);
-  var tokenStorageKey = "editbar_token";
+  // Scoped per apiBase (not just per host, like drafts/collapsed below) —
+  // a page embedding two different Editbar backends (different data-api)
+  // must not have one's token silently overwrite/leak into requests meant
+  // for the other.
+  var tokenStorageKey = "editbar_token:" + apiBase;
+  var LEGACY_TOKEN_KEY = "editbar_token";
   var draftsStorageKey = "editbar_drafts:" + location.host;
   var collapsedStorageKey = "editbar_collapsed:" + location.host;
 
@@ -71,7 +89,17 @@
       return fromUrl;
     }
     try {
-      return localStorage.getItem(tokenStorageKey) || "";
+      var stored = localStorage.getItem(tokenStorageKey);
+      if (stored) return stored;
+      // One-time migration from the pre-multi-tenant-safe key so upgrading
+      // doesn't silently sign existing admins out.
+      var legacy = localStorage.getItem(LEGACY_TOKEN_KEY);
+      if (legacy) {
+        localStorage.setItem(tokenStorageKey, legacy);
+        localStorage.removeItem(LEGACY_TOKEN_KEY);
+        return legacy;
+      }
+      return "";
     } catch (e) {
       return "";
     }
@@ -132,13 +160,103 @@
     return state.originals.get(key) ?? (el ? el.textContent : "");
   }
 
+  // Defense-in-depth allowlist sanitizer for richContent, applied here on
+  // every render regardless of what the backend claims to have already
+  // sanitized at save time. A hosted server (or any future backend
+  // implementing this API) sanitizing on save is the primary defense, but
+  // this widget ships to every plan and must not blindly trust a `text`
+  // value it didn't produce — a bug or bypass in that other, closed-source
+  // sanitizer would otherwise become an instant, unfixable-from-here stored
+  // XSS against every visitor. Deliberately minimal (no external
+  // dependency, matching the "one script tag, zero deps" project goal):
+  // a small inline-formatting tag allowlist, no attributes except a
+  // scheme-checked <a href>. Not a substitute for a real library if richer
+  // markup is ever needed — just enough to make plain "bold/italic/link"
+  // editing safe.
+  var RICH_ALLOWED_TAGS = {
+    B: [], STRONG: [], I: [], EM: [], U: [], BR: [], P: [], SPAN: [],
+    UL: [], OL: [], LI: [],
+    A: ["href"],
+  };
+  var RICH_ALLOWED_URL_SCHEMES = ["http:", "https:", "mailto:"];
+  // Removed with their entire subtree, not just unwrapped — text content
+  // inside these tags isn't meant to be read as document text (a <script>
+  // body, raw CSS, foreign-namespace markup).
+  var RICH_DANGEROUS_TAGS = {
+    SCRIPT: 1, STYLE: 1, IFRAME: 1, OBJECT: 1, EMBED: 1,
+    SVG: 1, MATH: 1, TEMPLATE: 1, NOSCRIPT: 1,
+  };
+
+  function isSafeRichUrl(value) {
+    try {
+      return RICH_ALLOWED_URL_SCHEMES.indexOf(new URL(value, location.href).protocol) !== -1;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Parses into a <template>'s inert content fragment — per spec, elements
+  // there (including <img>) don't load resources and scripts don't run, so
+  // nothing executes even before we've stripped dangerous nodes/attributes.
+  function sanitizeRichHtml(html) {
+    var template = document.createElement("template");
+    template.innerHTML = html;
+    var root = template.content;
+
+    var toRemove = [];
+    var toUnwrap = [];
+    var walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_COMMENT
+    );
+    var node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeType === Node.COMMENT_NODE) {
+        toRemove.push(node);
+        continue;
+      }
+      var tag = node.tagName;
+      if (RICH_DANGEROUS_TAGS[tag]) {
+        toRemove.push(node);
+        continue;
+      }
+      var allowedAttrs = RICH_ALLOWED_TAGS[tag];
+      if (!allowedAttrs) {
+        toUnwrap.push(node);
+        continue;
+      }
+      Array.prototype.slice.call(node.attributes).forEach(function (attr) {
+        var name = attr.name.toLowerCase();
+        if (allowedAttrs.indexOf(name) === -1) {
+          node.removeAttribute(attr.name);
+        } else if (name === "href" && !isSafeRichUrl(attr.value)) {
+          node.removeAttribute(attr.name);
+        }
+      });
+      if (tag === "A") {
+        node.setAttribute("rel", "noopener noreferrer");
+        node.setAttribute("target", "_blank");
+      }
+    }
+    toRemove.forEach(function (n) {
+      if (n.parentNode) n.parentNode.removeChild(n);
+    });
+    toUnwrap.forEach(function (n) {
+      var parent = n.parentNode;
+      if (!parent) return;
+      while (n.firstChild) parent.insertBefore(n.firstChild, n);
+      parent.removeChild(n);
+    });
+
+    var out = document.createElement("div");
+    out.appendChild(root);
+    return out.innerHTML;
+  }
+
   function applyText(el, key, text) {
-    // Values only ever reach here after server-side sanitization at save
-    // time (see the hosted server's richContent handling) — a site without
-    // richContent never sets state.richContent, so this stays textContent
-    // exactly as before, unconditionally, for every plan and self-hosted.
     if (state.richContent) {
-      if (el.innerHTML !== text) el.innerHTML = text;
+      var safe = sanitizeRichHtml(text);
+      if (el.innerHTML !== safe) el.innerHTML = safe;
     } else if (el.textContent !== text) {
       el.textContent = text;
     }

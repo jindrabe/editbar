@@ -1,3 +1,4 @@
+import { promises as fs } from "node:fs";
 import express from "express";
 import cors from "cors";
 import { rateLimit } from "express-rate-limit";
@@ -12,10 +13,28 @@ import {
 const MAX_KEYS_PER_REQUEST = 200;
 const MAX_VALUE_LENGTH = 20000;
 const SETUP_TTL_MS = 15 * 60 * 1000;
+const RESERVED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
+// req.ip honors Express's `trust proxy` setting and falls back to the raw
+// socket address when it's unset — so this is a strict improvement over
+// reading req.socket.remoteAddress directly, with no behavior change for
+// anyone who hasn't configured trust proxy. Without trust proxy configured
+// AND a reverse proxy on the same host (a very common self-hosting setup),
+// every remote request's socket connects from 127.0.0.1, which would make
+// this always report "loopback" — deployers behind a local reverse proxy
+// must set TRUST_PROXY (see index.js) or this check is meaningless.
 function defaultIsLoopback(req) {
-  const addr = req.socket && req.socket.remoteAddress;
+  const addr = req.ip || (req.socket && req.socket.remoteAddress);
   return addr === "127.0.0.1" || addr === "::1" || addr === "::ffff:127.0.0.1";
+}
+
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function renderSetupPage(token, origin) {
@@ -59,6 +78,7 @@ export function createApp({
   tokenFile = null,
   serverStartedAt = Date.now(),
   isLoopback = defaultIsLoopback,
+  trustProxy,
 }) {
   if (!editToken) {
     throw new Error("createApp requires a non-empty editToken");
@@ -68,11 +88,21 @@ export function createApp({
   }
 
   let currentToken = editToken;
-  let setupRevealed = false;
+  // Persisted to disk (next to tokenFile) rather than kept only in memory —
+  // an in-memory flag resets on every restart, which would reopen the
+  // remote reveal window for 15 more minutes after every crash/redeploy.
+  const setupRevealedFile = tokenFile ? `${tokenFile}.setup-revealed` : null;
 
   const app = express();
+  if (trustProxy !== undefined) app.set("trust proxy", trustProxy);
   app.use(cors());
   app.use(express.json({ limit: "100kb" }));
+  app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Frame-Options", "DENY");
+    next();
+  });
 
   const saveLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -104,6 +134,10 @@ export function createApp({
   });
 
   app.get("/overrides.json", async (req, res) => {
+    // Short, not-immediate-invalidating cache: every visitor's page load
+    // fetches this, so a few seconds of caching meaningfully cuts origin
+    // load without noticeably delaying "save is live for everyone".
+    res.set("Cache-Control", "public, max-age=5");
     const data = await readOverrides(overridesFile);
     res.json(data);
   });
@@ -128,6 +162,9 @@ export function createApp({
       });
     }
     for (const key of keys) {
+      if (RESERVED_KEYS.has(key)) {
+        return res.status(400).json({ error: `"${key}" is a reserved key name` });
+      }
       const value = changes[key];
       if (typeof value !== "string") {
         return res.status(400).json({ error: `value for "${key}" must be a string` });
@@ -144,7 +181,7 @@ export function createApp({
     res.json(next);
   });
 
-  app.get("/setup", (req, res) => {
+  app.get("/setup", async (req, res) => {
     if (!tokenFile) {
       return res
         .status(404)
@@ -155,7 +192,8 @@ export function createApp({
     }
     const loopback = isLoopback(req);
     const withinTtl = Date.now() - serverStartedAt < SETUP_TTL_MS;
-    if (!loopback && (setupRevealed || !withinTtl)) {
+    const alreadyRevealed = !loopback && (await fileExists(setupRevealedFile));
+    if (!loopback && (alreadyRevealed || !withinTtl)) {
       return res
         .status(410)
         .type("text/plain")
@@ -163,7 +201,7 @@ export function createApp({
           "Setup already completed or expired. Check the server's console output for the admin token, or use the Settings panel in the bar once you're signed in."
         );
     }
-    if (!loopback) setupRevealed = true;
+    if (!loopback) await fs.writeFile(setupRevealedFile, "1", "utf8");
     const origin = `${req.protocol}://${req.get("host")}`;
     res.type("text/html").send(renderSetupPage(currentToken, origin));
   });

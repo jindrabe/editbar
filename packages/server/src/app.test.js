@@ -112,6 +112,27 @@ describe("editbar server", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects reserved key names that could be confused with prototype internals", async () => {
+    // Sent as a raw JSON string rather than a JS object literal: a literal
+    // `{ __proto__: "x" }` in source sets the object's prototype instead of
+    // creating an own property, which would hide the exact bug this guards
+    // against — JSON.parse (what the server actually does to req.body) does
+    // create a real, iterable own property named "__proto__".
+    const res = await request(app)
+      .post("/overrides")
+      .set("Authorization", `Bearer ${TOKEN}`)
+      .set("Content-Type", "application/json")
+      .send('{"changes":{"__proto__":"x","hero.title":"ok"}}');
+    expect(res.status).toBe(400);
+  });
+
+  it("sets basic hardening headers on every response", async () => {
+    const res = await request(app).get("/overrides.json");
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.headers["referrer-policy"]).toBe("no-referrer");
+    expect(res.headers["x-frame-options"]).toBe("DENY");
+  });
+
   it("rejects too many keys in one request", async () => {
     const changes = {};
     for (let i = 0; i < 201; i++) changes[`key.${i}`] = "v";
@@ -199,6 +220,48 @@ describe("token provisioning", () => {
     });
     const res = await request(app).get("/setup");
     expect(res.status).toBe(410);
+  });
+
+  it("GET /setup stays one-time for non-loopback requests across a server restart", async () => {
+    const first = createApp({
+      editToken: TOKEN,
+      overridesFile,
+      tokenFile,
+      isLoopback: () => false,
+    });
+    const res1 = await request(first).get("/setup");
+    expect(res1.status).toBe(200);
+
+    // A fresh createApp() call with a fresh in-memory setupRevealed would
+    // reopen the window — this simulates a process restart (crash, deploy)
+    // sharing the same tokenFile on disk.
+    const second = createApp({
+      editToken: TOKEN,
+      overridesFile,
+      tokenFile,
+      isLoopback: () => false,
+    });
+    const res2 = await request(second).get("/setup");
+    expect(res2.status).toBe(410);
+  });
+
+  it("default isLoopback trusts X-Forwarded-For only when trustProxy is configured", async () => {
+    const app = createApp({
+      editToken: TOKEN,
+      overridesFile,
+      tokenFile,
+      trustProxy: true,
+    });
+    // Real client IP forwarded by a trusted proxy hop — must NOT be treated
+    // as loopback just because the proxy's own socket connection is local.
+    const res = await request(app)
+      .get("/setup")
+      .set("X-Forwarded-For", "203.0.113.5");
+    expect(res.status).toBe(200); // first-ever call, still within TTL
+    const second = await request(app)
+      .get("/setup")
+      .set("X-Forwarded-For", "203.0.113.5");
+    expect(second.status).toBe(410); // one-time reveal for this non-loopback caller
   });
 
   it("POST /token/rotate requires a valid token", async () => {

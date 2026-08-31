@@ -3,5 +3,6 @@ dist/
 .astro/
 .env
 .DS_Store
+.claude/
 packages/server/data/overrides.json
 packages/server/data/token.txt

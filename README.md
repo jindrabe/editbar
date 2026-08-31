@@ -148,6 +148,7 @@ The reference server (`packages/server`) reads these environment variables:
 | `EDIT_TOKEN`      | *(auto-generated if unset)*       | Shared secret required to save changes. Set this yourself to disable auto-provisioning and the rotate endpoint. |
 | `TOKEN_FILE`      | `packages/server/data/token.txt`  | Where the auto-generated/rotated token is persisted (ignored if `EDIT_TOKEN` is set) |
 | `OVERRIDES_FILE`  | `packages/server/data/overrides.json` | Where published text is stored              |
+| `TRUST_PROXY`     | *(unset)*                          | Set this if the server sits behind a reverse proxy (nginx, Caddy, a PaaS edge) on the same host — otherwise every request looks like it came from `127.0.0.1`, and the one-time `/setup` reveal never applies to real remote visitors. Accepts Express's own `trust proxy` values: `true`, `false`, a hop count, or a subnet name/list (e.g. `loopback`). |
 
 ## Self-hosting
 
@@ -173,6 +174,11 @@ needs to point at wherever you run the actual API (`/overrides.json`,
         data-api="https://your-editbar-server.example.com"
         defer></script>
 ```
+
+If you put a reverse proxy (nginx, Caddy, Traefik) in front of the Node
+process on the same host — a common setup for TLS termination — set
+`TRUST_PROXY` (see Configuration below), or `/setup`'s one-time admin-token
+reveal won't be able to tell a real remote visitor from your own proxy.
 
 ## Why not just use \<CMS\>?
 
